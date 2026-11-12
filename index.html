@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Production monitor</title>
+<style>
+:root{--bg:#e9ecef;--card:#fff;--ink:#1a2028;--mute:#5f6b78;--line:#cfd6dd;--acc:#1f4fd8;--ok:#15803d;--bad:#c62828;--warn:#b26a00;--badbg:#fdecea}
+@media (prefers-color-scheme:dark){:root{--bg:#11151a;--card:#1a2027;--ink:#e8ecf0;--mute:#8b97a4;--line:#2b343e;--acc:#7f9bff;--ok:#4ade80;--bad:#ff7b72;--warn:#f0b34a;--badbg:#3a1d1b}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 "Segoe UI",system-ui,sans-serif}
+header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:16px 24px;background:var(--card);border-bottom:1px solid var(--line)}
+h1{margin:0;font-size:20px}
+nav{display:flex;gap:4px}
+button,select,input{font:inherit;color:inherit}
+button{border:1px solid var(--line);background:var(--card);padding:7px 14px;border-radius:6px;cursor:pointer}
+button.p{background:var(--acc);border-color:var(--acc);color:#fff}
+button.tab.on{border-color:var(--ink);font-weight:600}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.badge{background:var(--bad);color:#fff;border-radius:99px;padding:0 7px;font-size:12px;margin-left:6px}
+.summary{display:flex;gap:28px;padding:16px 24px}
+.summary b{font-size:28px;display:block;line-height:1}.summary span{color:var(--mute);font-size:13px}
+.summary .bad b{color:var(--bad)}.summary .good b{color:var(--ok)}
+main{padding:0 24px 40px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.line{margin:18px 0 8px;font-weight:600;color:var(--mute)}
+.card{background:var(--card);border:1px solid var(--line);border-left:6px solid var(--line);border-radius:6px;padding:12px;display:flex;flex-direction:column;gap:3px}
+.card.ok{border-left-color:var(--ok)}.card.fault{border-left-color:var(--bad);background:var(--badbg)}
+.name{font-weight:600}.m{color:var(--mute);font-size:13px}
+.st{font-weight:600;font-size:13px}.ok .st{color:var(--ok)}.fault .st{color:var(--bad)}
+.val{font-size:26px;font-weight:600}
+.acts{display:flex;gap:6px;margin-top:6px}.acts button{padding:3px 10px;font-size:13px}
+table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line)}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);font-size:14px;vertical-align:top}
+th{color:var(--mute);font-weight:600}
+.sev-critical{color:var(--bad);font-weight:600}.sev-warning{color:var(--warn);font-weight:600}
+.empty{text-align:center;color:var(--mute);padding:50px 0}
+.bar{display:flex;gap:8px;padding:6px 0 12px;align-items:center}
+dialog{border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);width:min(440px,92vw);padding:20px}
+dialog::backdrop{background:#000a}
+dialog.alarm{border:3px solid var(--bad)}
+dialog.alarm h2{color:var(--bad);margin:0 0 8px}
+label{display:block;font-size:13px;color:var(--mute);margin-top:10px}
+input,select{width:100%;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);margin-top:3px}
+.row{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Production monitor</h1>
+  <nav><button class="tab on" data-v="dash">Dashboard</button><button class="tab" data-v="err">Errors<span class="badge" id="bd" hidden>0</span></button></nav>
+  <div style="display:flex;gap:8px"><button id="add">Add machine</button><button class="p" id="scanBtn">Scan network</button></div>
+</header>
+<div class="summary" id="sum"></div>
+<main id="main"></main>
+
+<dialog id="alarm" class="alarm"><h2 id="at">Production fault</h2><div id="ab"></div>
+  <div class="row"><button id="aview">Open errors page</button><button class="p" id="aack">Acknowledge</button></div></dialog>
+
+<dialog id="dlg"><h2 id="dt" style="margin:0;font-size:18px">Add machine</h2>
+  <label>Name<input id="n" placeholder="Filling machine 2"></label>
+  <label>IP address<input id="ip" placeholder="192.168.0.20"></label>
+  <label>Production line<input id="l" placeholder="Line A"></label>
+  <label>Type<select id="t"><option value="plc">PLC</option><option value="sensor">Sensor</option><option value="camera">Camera</option><option value="hmi">HMI / panel</option><option value="other">Other</option></select></label>
+  <label>What to check<select id="k"><option value="ping">Responds to ping</option><option value="tcp">A network port is open</option><option value="modbus">Modbus value stays in range</option><option value="mqtt">MQTT topic is fresh and in range</option></select></label>
+  <div id="f-port"><label>Port<input id="cp" type="number" value="502"></label></div>
+  <div id="f-mb"><label>Modbus unit ID<input id="cu" type="number" value="1"></label><label>Holding register<input id="cr" type="number" value="0"></label></div>
+  <div id="f-mq"><label>Topic (wildcards + and # allowed)<input id="ctopic" placeholder="plant/line1/temperature"></label>
+    <label>JSON field, if the message is JSON (optional)<input id="ckey" placeholder="data.temp"></label>
+    <label>Raise a fault if no message for (seconds)<input id="cstale" type="number" value="60"></label>
+    <label>Username (optional)<input id="cuser" autocomplete="off"></label><label>Password (leave blank to keep the saved one)<input id="cpass" type="password" autocomplete="new-password"></label></div>
+  <div id="f-rg"><label>Minimum allowed<input id="cmin" type="number" step="any"></label><label>Maximum allowed<input id="cmax" type="number" step="any"></label></div>
+  <div class="row"><button id="cancel">Cancel</button><button class="p" id="save">Save machine</button></div></dialog>
+
+<script>
+const $=id=>document.getElementById(id);
+let st={assets:[],errors:[],scan:{}},view="dash",editId=null,seen=null,queue=[];
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const api=(p,m="GET",b)=>fetch("/api/"+p,{method:m,headers:{"Content-Type":"application/json"},body:b?JSON.stringify(b):undefined}).then(r=>r.json());
+const T=t=>new Date(t*1000).toLocaleString();
+function beep(){try{const c=new AudioContext(),o=c.createOscillator();o.frequency.value=880;o.connect(c.destination);o.start();setTimeout(()=>{o.stop();c.close()},350)}catch(e){}}
+
+async function load(){
+  st=await api("state");
+  const active=st.errors.filter(e=>e.status==="active");
+  $("bd").hidden=!active.length;$("bd").textContent=active.length;
+  $("scanBtn").disabled=st.scan.running;$("scanBtn").textContent=st.scan.running?"Scanning…":"Scan network";
+  document.title=(active.length?`(${active.length}) `:"")+"Production monitor";
+  // popup for errors that appeared since the last refresh
+  const ids=new Set(st.errors.map(e=>e.id));
+  if(seen===null)seen=ids; else{
+    active.filter(e=>!seen.has(e.id)).forEach(e=>queue.push(e));seen=ids;
+  }
+  showAlarm();render();
+}
+function showAlarm(){
+  queue=queue.filter(e=>st.errors.find(x=>x.id===e.id&&x.status==="active"));
+  const d=$("alarm");if(!queue.length||d.open)return;
+  const e=queue[0];$("at").textContent=e.severity==="critical"?"Production stopped":"Value out of range";
+  $("ab").innerHTML=`<b>${esc(e.asset)}</b>${e.line?" · "+esc(e.line):""}<br>${esc(e.message)}<br><span class="m">${T(e.ts)}${queue.length>1?` · ${queue.length-1} more fault(s) waiting`:""}</span>`;
+  d.showModal();beep();
+}
+$("aack").onclick=async()=>{await api(`errors/${queue[0].id}/ack`,"POST");queue.shift();$("alarm").close();load()};
+$("aview").onclick=()=>{queue=[];$("alarm").close();setView("err")};
+
+function render(){
+  const a=st.assets,bad=a.filter(x=>x.state==="fault").length,ok=a.filter(x=>x.state==="ok").length;
+  $("sum").innerHTML=`<div class="good"><b>${ok}</b><span>running</span></div><div class="bad"><b>${bad}</b><span>faults</span></div><div><b>${a.length}</b><span>machines</span></div>`;
+  $("main").innerHTML=view==="dash"?dash():errs();
+}
+function dash(){
+  if(!st.assets.length)return`<div class="empty">No machines yet. Press <b>Scan network</b> or <b>Add machine</b>.</div>`;
+  const g={};st.assets.forEach(a=>(g[a.line||"No line assigned"]??=[]).push(a));
+  return Object.entries(g).map(([l,list])=>`<div class="line">${esc(l)}</div><div class="grid">${list.sort((x,y)=>(y.state==="fault")-(x.state==="fault")).map(card).join("")}</div>`).join("");
+}
+function card(a){
+  const s=a.state==="fault"?"Fault":a.state==="ok"?"Running":"Checking…";
+  const c=a.check||{};
+  return`<div class="card ${a.state==="unknown"?"":a.state}"><div class="name">${esc(a.name)}</div><div class="m">${esc(a.ip)} · ${esc(a.type)}</div>
+  <div class="st">${s}${a.since?" since "+new Date(a.since*1000).toLocaleTimeString():""}</div>
+  ${a.value!=null?`<div class="val">${a.value}</div>`:""}
+  ${a.state==="fault"?`<div class="m">${esc(a.problem||"")}</div>`:""}
+  <div class="m">Check: ${c.kind==="modbus"?`Modbus reg ${c.register} (${c.min??"–"} to ${c.max??"–"})`:c.kind==="mqtt"?`MQTT ${esc(c.topic)} (${c.min||"–"} to ${c.max||"–"})`:c.kind==="tcp"?"port "+c.port:"ping"}</div>
+  <div class="acts"><button data-e="${a.id}">Edit</button><button data-x="${a.id}">Remove</button></div></div>`;
+}
+function errs(){
+  const rows=st.errors.map(e=>`<tr><td>${T(e.ts)}</td><td class="sev-${e.severity}">${e.severity==="critical"?"Critical":"Warning"}</td>
+  <td>${esc(e.asset)}<div class="m">${esc(e.line)}</div></td><td>${esc(e.message)}</td>
+  <td>${e.status==="active"?"<b>Active</b>":e.status==="acknowledged"?"Acknowledged":"Resolved "+T(e.resolved_ts)}</td>
+  <td>${e.status==="active"?`<button data-a="${e.id}">Acknowledge</button>`:""}</td></tr>`).join("");
+  return`<div class="bar"><button data-clear="1">Clear resolved</button></div>`+(rows?`<div style="overflow-x:auto"><table><tr><th>Time</th><th>Level</th><th>Machine</th><th>Problem</th><th>Status</th><th></th></tr>${rows}</table></div>`:`<div class="empty">No errors. Production is running normally.</div>`);
+}
+function setView(v){view=v;document.querySelectorAll(".tab").forEach(b=>b.classList.toggle("on",b.dataset.v===v));render()}
+function kind(){const k=$("k").value;$("f-port").style.display=k==="ping"?"none":"block";$("f-mb").style.display=k==="modbus"?"block":"none";$("f-mq").style.display=k==="mqtt"?"block":"none";$("f-rg").style.display=k==="modbus"||k==="mqtt"?"block":"none"}
+$("k").onchange=()=>{if(["","80","502","1883"].includes($("cp").value))$("cp").value=({mqtt:1883,modbus:502}[$("k").value]||80);kind()};
+function openDlg(a){
+  editId=a?.id||null;const c=a?.check||{kind:"ping"};
+  $("dt").textContent=a?"Edit machine":"Add machine";
+  $("n").value=a?.name||"";$("ip").value=a?.ip||"";$("l").value=a?.line||"";$("t").value=a?.type||"plc";$("k").value=c.kind;
+  $("cp").value=c.port||502;$("cu").value=c.unit??1;$("cr").value=c.register??0;$("cmin").value=c.min??"";$("cmax").value=c.max??"";$("ctopic").value=c.topic||"";$("ckey").value=c.key||"";$("cuser").value=c.user||"";$("cpass").value="";$("cstale").value=c.stale??60;
+  kind();$("dlg").showModal();
+}
+$("add").onclick=()=>openDlg();$("cancel").onclick=()=>$("dlg").close();
+$("save").onclick=async()=>{
+  if(!$("ip").value.trim()){$("ip").focus();return}
+  const k=$("k").value,check={kind:k};
+  if(k!=="ping")check.port=+$("cp").value;
+  if(k==="modbus")Object.assign(check,{unit:+$("cu").value,register:+$("cr").value});
+  if(k==="mqtt")Object.assign(check,{topic:$("ctopic").value.trim(),key:$("ckey").value.trim(),user:$("cuser").value.trim(),pass:$("cpass").value,stale:+$("cstale").value||60});
+  if(k==="modbus"||k==="mqtt"){check.min=$("cmin").value;check.max=$("cmax").value}
+  const b={name:$("n").value.trim(),ip:$("ip").value.trim(),line:$("l").value.trim(),type:$("t").value,check};
+  editId?await api("assets/"+editId,"PUT",b):await api("assets","POST",b);$("dlg").close();load();
+};
+$("scanBtn").onclick=async()=>{await api("scan","POST");load()};
+document.addEventListener("click",async e=>{
+  const d=e.target.dataset;
+  if(d.v)setView(d.v);
+  if(d.e)openDlg(st.assets.find(a=>a.id===d.e));
+  if(d.x&&confirm("Remove this machine from monitoring?")){await api("assets/"+d.x,"DELETE");load()}
+  if(d.a){await api(`errors/${d.a}/ack`,"POST");load()}
+  if(d.clear){await api("errors/clear","POST");load()}
+});
+load();setInterval(load,3000);
+</script>
+</body>
+</html>
