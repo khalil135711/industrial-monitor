@@ -1,3 +1,4 @@
+<img width="1912" height="805" alt="Bildschirmfoto 2026-11-12 um 16 16 03" src="https://github.com/user-attachments/assets/691a0a2f-9699-422e-8157-9602eebbb59f" />
 # Industrial Monitor
 
 A local production monitor. It watches your machines, PLCs, sensors and cameras on the factory network, shows a live status board, and raises a popup alarm and an entry on the Errors page when something goes wrong. Nothing leaves your network.
